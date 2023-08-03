@@ -1,188 +1,195 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
-	"math"
-	"unicode"
+	"github.com/spf13/cobra"
+	"golang.org/x/crypto/pbkdf2"
+	"io"
+	"io/ioutil"
+	"log"
+	"os"
 )
 
+var rootCmd = &cobra.Command{
+	Use:   "pass-man-client",
+	Short: "A password manager client tool",
+	Long: `A password manager client tool. Complete documentation is available at http://pass-man-client.io`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("Use pass-man-client with commands: config, new, get")
+	},
+}
+
+var configCmd = &cobra.Command{
+	Use:   "config [username] [password]",
+	Short: "Configure master username and password",
+	Long:  `The config command allows you to set the master username and password.`,
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		username := args[0]
+		password := args[1]
+
+		symmetricKey := generateSymmetricKey(password)
+		storeConfiguration(username, symmetricKey)
+	},
+}
+
+var newCmd = &cobra.Command{
+	Use:   "new [description] [username] [password]",
+	Short: "Create new account information",
+	Long:  `The new command allows you to store new account information including description, username, and an optional password.`,
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		description := args[0]
+		username := args[1]
+		password := ""
+		if len(args) > 2 {
+			password = args[2]
+		}
+
+		config := loadConfiguration(username)
+		encryptedData, _ := encryptWithKey(config.SymmetricKey, description, username, password)
+		storeInDatabase(description, username, encryptedData)
+	},
+}
+
+var getCmd = &cobra.Command{
+	Use:   "get [description]",
+	Short: "Get account information",
+	Long:  `The get command allows you to fetch account information based on its description.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		description := args[0]
+
+		dbData := retrieveFromDatabase(description)
+		config := loadConfiguration(dbData.Username)
+		accountInfo, _ := decryptWithKey(config.SymmetricKey, dbData.EncryptedData)
+		fmt.Println("Account Info:", accountInfo)
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(configCmd, newCmd, getCmd)
+}
+
 func main() {
-	fmt.Println("Password Strength Checker")
-	fmt.Println("-------------------------")
+	if err := rootCmd.Execute(); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+}
 
-	password := readPassword()
-	strengthScore := calculatePasswordStrength(password)
-	strengthRating := getPasswordStrengthRating(strengthScore)
+func generateSymmetricKey(password string) string {
+	salt := []byte("somesalt") // This should be unique for each user in production application
+	key := pbkdf2.Key([]byte(password), salt, 4096, 32, sha256.New)
+	return base64.StdEncoding.EncodeToString(key)
+}
 
-	if strengthScore <= 1 {
-		suggestions := getPasswordSuggestions(password)
-		fmt.Println("Password is weak. Consider the following suggestions:")
-		for _, suggestion := range suggestions {
-			fmt.Println("-", suggestion)
+func storeConfiguration(username, symmetricKey string) {
+	data := &configuration{
+		Username:     username,
+		SymmetricKey: symmetricKey,
+	}
+
+	file, _ := json.MarshalIndent(data, "", " ")
+	_ = ioutil.WriteFile("config.json", file, 0644)
+}
+
+func loadConfiguration(username string) *configuration {
+	file, _ := ioutil.ReadFile("config.json")
+
+	data := new(configuration)
+	_ = json.Unmarshal([]byte(file), data)
+
+	return data
+}
+
+func encryptWithKey(symmetricKey, description, username, password string) (string, error) {
+	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	plaintext := []byte(description + username + password)
+	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
+	iv := ciphertext[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", err
+	}
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+
+	return base64.URLEncoding.EncodeToString(ciphertext), nil
+}
+
+func storeInDatabase(description, username, encryptedData string) {
+	dbData := &databaseData{
+		Description:   description,
+		Username:      username,
+		EncryptedData: encryptedData,
+	}
+
+	file, _ := ioutil.ReadFile("database.json")
+	var db []*databaseData
+	_ = json.Unmarshal([]byte(file), &db)
+	db = append(db, dbData)
+
+	file, _ = json.MarshalIndent(db, "", " ")
+	_ = ioutil.WriteFile("database.json", file, 0644)
+}
+
+func retrieveFromDatabase(description string) *databaseData {
+	file, _ := ioutil.ReadFile("database.json")
+
+	var db []*databaseData
+	_ = json.Unmarshal([]byte(file), &db)
+
+	for _, dbData := range db {
+		if dbData.Description == description {
+			return dbData
 		}
 	}
 
-	fmt.Printf("Password Strength: %s\n", strengthRating)
+	return &databaseData{}
 }
 
-func readPassword() string {
-	fmt.Print("Enter your password: ")
-	var password string
-	fmt.Scanln(&password)
-	return password
+func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
+	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedData)
+
+	if len(ciphertext) < aes.BlockSize {
+		return "", errors.New("Ciphertext too short")
+	}
+
+	iv := ciphertext[:aes.BlockSize]
+	ciphertext = ciphertext[aes.BlockSize:]
+
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(ciphertext, ciphertext)
+
+	return string(ciphertext), nil
 }
 
-func calculatePasswordStrength(password string) int {
-	strength := 0
-
-	// Criteria checks
-	if len(password) >= 8 {
-		strength++
-	}
-
-	if hasUpperCaseLetter(password) {
-		strength++
-	}
-
-	if hasLowerCaseLetter(password) {
-		strength++
-	}
-
-	if hasNumber(password) {
-		strength++
-	}
-
-	if hasSpecialCharacter(password) {
-		strength++
-	}
-
-	return strength
+type configuration struct {
+	Username     string
+	SymmetricKey string
 }
 
-func hasUpperCaseLetter(password string) bool {
-	return strings.ContainsAny(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-}
-
-func hasLowerCaseLetter(password string) bool {
-	return strings.ContainsAny(password, "abcdefghijklmnopqrstuvwxyz")
-}
-
-func hasNumber(password string) bool {
-	return strings.ContainsAny(password, "0123456789")
-}
-
-func hasSpecialCharacter(password string) bool {
-	specialCharacters := "!@#$%^&*()_+{}[]:;<>,.?/~`"
-	leetCharacters := "4bcd3fgh1jklmn0pqr57uvwxy2"
-
-	// Check for special characters
-	for _, char := range password {
-		if strings.ContainsRune(specialCharacters, char) {
-			return true
-		}
-	}
-
-	// Check for leet speak substitutions
-	for _, char := range password {
-		if unicode.IsLetter(char) {
-			leetIndex := int(unicode.ToLower(char)) - 'a'
-			if leetIndex >= 0 && leetIndex < len(leetCharacters) {
-				leetEquivalent := rune(leetCharacters[leetIndex])
-				if strings.ContainsRune(password, leetEquivalent) {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-func getPasswordStrengthRating(strength int) string {
-	switch strength {
-	case 0, 1:
-		return "Weak"
-	case 2:
-		return "Moderate"
-	case 3, 4:
-		return "Strong"
-	default:
-		return "Very Strong"
-	}
-}
-
-func calculateEntropy(password string) float64 {
-	charsetSize := 0
-	entropy := 0.0
-
-	if hasUpperCaseLetter(password) {
-		charsetSize += 26
-		entropy += math.Log2(26)
-	}
-
-	if hasLowerCaseLetter(password) {
-		charsetSize += 26
-		entropy += math.Log2(26)
-	}
-
-	if hasNumber(password) {
-		charsetSize += 10
-		entropy += math.Log2(10)
-	}
-
-	if hasSpecialCharacter(password) {
-		charsetSize += 32 // Assuming 32 possible special characters
-		entropy += math.Log2(32)
-	}
-
-	return float64(charsetSize) * entropy
-}
-
-func getPasswordSuggestions(password string) []string {
-	var suggestions []string
-
-	if len(password) < 8 {
-		suggestions = append(suggestions, "Use at least 8 characters")
-	}
-
-	if !hasUpperCaseLetter(password) {
-		suggestions = append(suggestions, "Include at least one uppercase letter")
-	}
-
-	if !hasLowerCaseLetter(password) {
-		suggestions = append(suggestions, "Include at least one lowercase letter")
-	}
-
-	if !hasNumber(password) {
-		suggestions = append(suggestions, "Include at least one number")
-	}
-
-	if !hasSpecialCharacter(password) {
-		suggestions = append(suggestions, "Include at least one special character")
-	}
-
-	if isCommonPassword(password) {
-		suggestions = append(suggestions, "Avoid using common or easily guessable passwords")
-	}
-
-	return suggestions
-}
-
-func isCommonPassword(password string) bool {
-	commonPasswords := []string{
-		"password", "123456", "qwerty", "admin", "letmein", "monkey", "abc123",
-		"iloveyou", "123123", "password1", "qwertyuiop", "welcome", "login",
-		"password123", "12345", "sunshine", "1234567890", "princess", "admin123",
-		"password!@#", "baseball", "password1", "dragon", "trustno1",
-	}
-
-	password = strings.ToLower(password)
-	for _, commonPwd := range commonPasswords {
-		if password == commonPwd {
-			return true
-		}
-	}
-
-	return false
+type databaseData struct {
+	Description   string
+	Username      string
+	EncryptedData string
 }
