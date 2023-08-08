@@ -5,6 +5,8 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -190,6 +192,41 @@ func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
 	stream.XORKeyStream(ciphertext, ciphertext)
 
 	return string(ciphertext), nil
+}
+
+func loadCACert() (*x509.CertPool, error) {
+	// Load the CA certificate
+	caCert, err := ioutil.ReadFile("ca-cert.pem")
+	if err != nil {
+		return nil, err
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	return caCertPool, nil
+}
+
+func createTLSConfig() (*tls.Config, error) {
+	caCertPool, err := loadCACert()
+	if err != nil {
+		return nil, err
+	}
+
+	clientCert := "server-cert.pem"
+	clientKey := "server-key.pem"
+
+	cert, err := tls.LoadX509KeyPair(clientCert, clientKey)
+	if err != nil {
+		return nil, err
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caCertPool,
+	}
+
+	return tlsConfig, nil
 }
 
 type configuration struct {
