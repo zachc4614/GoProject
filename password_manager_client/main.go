@@ -4,27 +4,27 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/spf13/cobra"
-	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/crypto/pbkdf2"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	_ "github.com/lib/pq"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
+	"runtime/debug"
+	"time"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/pbkdf2"
 )
+
+// User represents user information
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
 
 // Configuration represents the user's configuration
 type Configuration struct {
@@ -46,13 +46,17 @@ type AccountInfo struct {
 	Password    string `json:"password"`
 }
 
+var logger *log.Logger
+var db *sql.DB
+var serverCertPath = "server-cert.pem"
+var serverKeyPath = "server-key.pem" 
+var caCertPath = "ca-cert.pem"  
+
 // User represents user information
 type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
-
-// ... (other data structures and code)
 
 func createGUI() fyne.Window {
 	myApp := app.New()
@@ -97,6 +101,12 @@ func createGUI() fyne.Window {
 }
 
 func main() {
+	logger = log.New(os.Stdout, "[PasswordManager] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Printf("Panic: %v\n%s", r, debug.Stack())
+		}
+	}()
 	connectToDatabase()
 	initTLS()
 
@@ -164,8 +174,6 @@ func UserFromJSON(data []byte) (*User, error) {
 	return &u, nil
 }
 
-// ... (other command definitions)
-
 // backupCmd defines the "backup" command
 var backupCmd = &cobra.Command{
 	Use:   "backup [backupPath]",
@@ -202,9 +210,9 @@ var recoverCmd = &cobra.Command{
 }
 
 var db *sql.DB
-var serverCertPath = "server-cert.pem" // Update with the actual path
-var serverKeyPath = "server-key.pem"   // Update with the actual path
-var caCertPath = "ca-cert.pem"         // Update with the actual path
+var serverCertPath = "server-cert.pem" 
+var serverKeyPath = "server-key.pem"   
+var caCertPath = "ca-cert.pem"       
 
 func init() {
 	rootCmd.AddCommand(configCmd, newCmd, getCmd, backupCmd, recoverCmd)
@@ -226,14 +234,14 @@ func connectToDatabase() {
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("Database connection error:", err)
 	}
 
 	if err = db.Ping(); err != nil {
-		log.Fatal(err)
+		logger.Fatal("Database ping error:", err)
 	}
 
-	fmt.Println("Connected to the database!")
+	logger.Println("Connected to the database!")
 }
 
 // Server configuration
@@ -326,8 +334,6 @@ func loadConfiguration(username string) *Configuration {
 	return data
 }
 
-// ... (other configurations and functions)
-
 // Data structure for user authentication
 type User struct {
 	Username string
@@ -357,8 +363,6 @@ func encryptWithKey(symmetricKey, description, username, password string) (strin
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
-// ... (other encryption and decryption functions)
-
 // Data structure for configuration
 type Configuration struct {
 	Username     string
@@ -371,8 +375,6 @@ type DatabaseData struct {
 	Username      string
 	EncryptedData string
 }
-
-// ... (other data structures)
 
 // Store encrypted data in the database
 func storeInDatabase(description, username, encryptedData string) {
