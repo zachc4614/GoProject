@@ -1,4 +1,4 @@
-FROM golang:1.20 AS builder
+FROM golang:1.17 AS builder
 
 WORKDIR /app
 COPY password_manager_client/ .
