@@ -432,3 +432,4 @@ type databaseData struct {
 	Username      string
 	EncryptedData string
 }
+
