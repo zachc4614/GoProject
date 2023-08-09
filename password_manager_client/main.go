@@ -4,8 +4,12 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,10 +17,12 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
-	"time"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/crypto/pbkdf2"
+	_ "github.com/lib/pq" // Assuming you're using PostgreSQL
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 )
 
 // User represents user information
@@ -38,64 +44,24 @@ type DatabaseData struct {
 	EncryptedData string `json:"encrypted_data"`
 }
 
-// AccountInfo represents account information
-type AccountInfo struct {
-	Description string `json:"description"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-}
-
+// Global variables
 var logger *log.Logger
 var db *sql.DB
 var serverCertPath = "server-cert.pem"
-var serverKeyPath = "server-key.pem" 
-var caCertPath = "ca-cert.pem"  
-
-// User represents user information
-type User struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
+var serverKeyPath = "server-key.pem"
+var caCertPath = "ca-cert.pem"
 
 func createGUI() fyne.Window {
 	myApp := app.New()
-
 	window := myApp.NewWindow("Password Manager")
-
 	titleLabel := widget.NewLabel("Welcome to Password Manager")
 	descriptionLabel := widget.NewLabel("Manage your passwords securely.")
-
-	newButton := widget.NewButton("New Account", func() {
-		// Handle New Account button click
-		fmt.Println("New Account button clicked")
-	})
-
-	getButton := widget.NewButton("Get Account", func() {
-		// Handle Get Account button click
-		fmt.Println("Get Account button clicked")
-	})
-
-	backupButton := widget.NewButton("Backup", func() {
-		// Handle Backup button click
-		fmt.Println("Backup button clicked")
-	})
-
-	recoverButton := widget.NewButton("Recover", func() {
-		// Handle Recover button click
-		fmt.Println("Recover button clicked")
-	})
-
-	content := container.NewVBox(
-		titleLabel,
-		descriptionLabel,
-		newButton,
-		getButton,
-		backupButton,
-		recoverButton,
-	)
-
+	newButton := widget.NewButton("New Account", func() { fmt.Println("New Account button clicked") })
+	getButton := widget.NewButton("Get Account", func() { fmt.Println("Get Account button clicked") })
+	backupButton := widget.NewButton("Backup", func() { fmt.Println("Backup button clicked") })
+	recoverButton := widget.NewButton("Recover", func() { fmt.Println("Recover button clicked") })
+	content := container.NewVBox(titleLabel, descriptionLabel, newButton, getButton, backupButton, recoverButton)
 	window.SetContent(content)
-
 	return window
 }
 
@@ -108,125 +74,10 @@ func main() {
 	}()
 	connectToDatabase()
 	initTLS()
-
 	guiWindow := createGUI()
 	guiWindow.ShowAndRun()
 }
 
-// ToJSON converts Configuration to JSON format
-func (c *Configuration) ToJSON() ([]byte, error) {
-	return json.MarshalIndent(c, "", "  ")
-}
-
-// ConfigurationFromJSON converts JSON data to Configuration struct
-func ConfigurationFromJSON(data []byte) (*Configuration, error) {
-	var c Configuration
-	err := json.Unmarshal(data, &c)
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
-
-// ToJSON converts DatabaseData to JSON format
-func (d *DatabaseData) ToJSON() ([]byte, error) {
-	return json.MarshalIndent(d, "", "  ")
-}
-
-// DatabaseDataFromJSON converts JSON data to DatabaseData struct
-func DatabaseDataFromJSON(data []byte) (*DatabaseData, error) {
-	var d DatabaseData
-	err := json.Unmarshal(data, &d)
-	if err != nil {
-		return nil, err
-	}
-	return &d, nil
-}
-
-// ToJSON converts AccountInfo to JSON format
-func (a *AccountInfo) ToJSON() ([]byte, error) {
-	return json.MarshalIndent(a, "", "  ")
-}
-
-// AccountInfoFromJSON converts JSON data to AccountInfo struct
-func AccountInfoFromJSON(data []byte) (*AccountInfo, error) {
-	var a AccountInfo
-	err := json.Unmarshal(data, &a)
-	if err != nil {
-		return nil, err
-	}
-	return &a, nil
-}
-
-// ToJSON converts User to JSON format
-func (u *User) ToJSON() ([]byte, error) {
-	return json.MarshalIndent(u, "", "  ")
-}
-
-// UserFromJSON converts JSON data to User struct
-func UserFromJSON(data []byte) (*User, error) {
-	var u User
-	err := json.Unmarshal(data, &u)
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
-}
-
-// backupCmd defines the "backup" command
-var backupCmd = &cobra.Command{
-	Use:   "backup [backupPath]",
-	Short: "Create a backup of encrypted data",
-	Long:  `The backup command allows you to create a backup of your encrypted account data.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		backupPath := args[0]
-		config := loadConfiguration("default")
-		dbData := retrieveAllFromDatabase()
-		backupData := BackupData{Configuration: config, EncryptedData: dbData}
-		backupDataJSON, _ := backupData.ToJSON()
-		_ = ioutil.WriteFile(backupPath, backupDataJSON, 0644)
-	},
-}
-
-// recoverCmd defines the "recover" command
-var recoverCmd = &cobra.Command{
-	Use:   "recover [backupPath]",
-	Short: "Recover account data from a backup",
-	Long:  `The recover command allows you to recover your account data from a backup file.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		backupPath := args[0]
-		backupDataJSON, err := ioutil.ReadFile(backupPath)
-		if err != nil {
-			log.Fatal("Error reading backup file:", err)
-		}
-		var backupData BackupData
-		_ = json.Unmarshal(backupDataJSON, &backupData)
-		storeConfiguration("default", backupData.Configuration.SymmetricKey)
-		storeAllInDatabase(backupData.EncryptedData)
-	},
-}
-
-var db *sql.DB
-var serverCertPath = "server-cert.pem" 
-var serverKeyPath = "server-key.pem"   
-var caCertPath = "ca-cert.pem"       
-
-func init() {
-	rootCmd.AddCommand(configCmd, newCmd, getCmd, backupCmd, recoverCmd)
-}
-
-func main() {
-	connectToDatabase()
-	initTLS()
-	if err := rootCmd.Execute(); err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-}
-
-// Database connection setup
 func connectToDatabase() {
 	// Set your database connection parameters here
 	connStr := "user=username dbname=mydb sslmode=disable password=mypassword"
@@ -235,15 +86,11 @@ func connectToDatabase() {
 	if err != nil {
 		logger.Fatal("Database connection error:", err)
 	}
-
 	if err = db.Ping(); err != nil {
 		logger.Fatal("Database ping error:", err)
 	}
-
 	logger.Println("Connected to the database!")
 }
-
-// Server configuration
 
 func initTLS() {
 	cert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
@@ -256,19 +103,16 @@ func initTLS() {
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
-
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		ClientCAs:    caCertPool,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
-
 	http.HandleFunc("/", handleRequest)
 	server := &http.Server{
 		Addr:      ":8443",
 		TLSConfig: tlsConfig,
 	}
-
 	go func() {
 		log.Println("Starting server on :8443...")
 		if err := server.ListenAndServeTLS("", ""); err != nil {
