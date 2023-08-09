@@ -1,1 +1,47 @@
-na
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Build and test
+        run: |
+          cd password_manager_client
+          go build
+          go test -v ./...
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker
+        uses: actions/setup-docker@v2
+        with:
+          dockerfile: Dockerfile
+          build-args: |
+            - BUILD_VERSION=${{ github.sha }}
+
+      - name: Build Docker image
+        run: docker build -t password-manager:${{ github.sha }} .
+
+      - name: Deploy to Docker
+        run: |
+          docker run -d --name password-manager-app password-manager:${{ github.sha }}
