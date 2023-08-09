@@ -13,87 +13,215 @@ import (
 	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/pbkdf2"
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
-
 	_ "github.com/lib/pq"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "pass-man-client",
-	Short: "A password manager client tool",
-	Long:  `A password manager client tool. Complete documentation is available at http://pass-man-client.io`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Use pass-man-client with commands: config, new, get")
-	},
+// Configuration represents the user's configuration
+type Configuration struct {
+	Username     string `json:"username"`
+	SymmetricKey string `json:"symmetric_key"`
 }
 
-var configCmd = &cobra.Command{
-	Use:   "config [username] [password]",
-	Short: "Configure master username and password",
-	Long:  `The config command allows you to set the master username and password.`,
-	Args:  cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		username := args[0]
-		password := args[1]
-
-		symmetricKey := generateSymmetricKey(password)
-		storeConfiguration(username, symmetricKey)
-	},
+// DatabaseData represents the encrypted data stored in the database
+type DatabaseData struct {
+	Description   string `json:"description"`
+	Username      string `json:"username"`
+	EncryptedData string `json:"encrypted_data"`
 }
 
-var newCmd = &cobra.Command{
-	Use:   "new [description] [username] [password]",
-	Short: "Create new account information",
-	Long:  `The new command allows you to store new account information including description, username, and an optional password.`,
-	Args:  cobra.MinimumNArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		description := args[0]
-		username := args[1]
-		password := ""
-		if len(args) > 2 {
-			password = args[2]
-		}
-
-		config := loadConfiguration(username)
-		encryptedData, _ := encryptWithKey(config.SymmetricKey, description, username, password)
-		storeInDatabase(description, username, encryptedData)
-	},
+// AccountInfo represents account information
+type AccountInfo struct {
+	Description string `json:"description"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
 }
 
-var getCmd = &cobra.Command{
-	Use:   "get [description]",
-	Short: "Get account information",
-	Long:  `The get command allows you to fetch account information based on its description.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		description := args[0]
-
-		dbData := retrieveFromDatabase(description)
-		config := loadConfiguration(dbData.Username)
-		accountInfo, _ := decryptWithKey(config.SymmetricKey, dbData.EncryptedData)
-		fmt.Println("Account Info:", accountInfo)
-	},
+// User represents user information
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
-var db *sql.DB
+// ... (other data structures and code)
 
-func init() {
-	rootCmd.AddCommand(configCmd, newCmd, getCmd)
+func createGUI() fyne.Window {
+	myApp := app.New()
+
+	window := myApp.NewWindow("Password Manager")
+
+	titleLabel := widget.NewLabel("Welcome to Password Manager")
+	descriptionLabel := widget.NewLabel("Manage your passwords securely.")
+
+	newButton := widget.NewButton("New Account", func() {
+		// Handle New Account button click
+		fmt.Println("New Account button clicked")
+	})
+
+	getButton := widget.NewButton("Get Account", func() {
+		// Handle Get Account button click
+		fmt.Println("Get Account button clicked")
+	})
+
+	backupButton := widget.NewButton("Backup", func() {
+		// Handle Backup button click
+		fmt.Println("Backup button clicked")
+	})
+
+	recoverButton := widget.NewButton("Recover", func() {
+		// Handle Recover button click
+		fmt.Println("Recover button clicked")
+	})
+
+	content := container.NewVBox(
+		titleLabel,
+		descriptionLabel,
+		newButton,
+		getButton,
+		backupButton,
+		recoverButton,
+	)
+
+	window.SetContent(content)
+
+	return window
 }
 
 func main() {
 	connectToDatabase()
+	initTLS()
+
+	guiWindow := createGUI()
+	guiWindow.ShowAndRun()
+}
+
+// ToJSON converts Configuration to JSON format
+func (c *Configuration) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(c, "", "  ")
+}
+
+// ConfigurationFromJSON converts JSON data to Configuration struct
+func ConfigurationFromJSON(data []byte) (*Configuration, error) {
+	var c Configuration
+	err := json.Unmarshal(data, &c)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// ToJSON converts DatabaseData to JSON format
+func (d *DatabaseData) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(d, "", "  ")
+}
+
+// DatabaseDataFromJSON converts JSON data to DatabaseData struct
+func DatabaseDataFromJSON(data []byte) (*DatabaseData, error) {
+	var d DatabaseData
+	err := json.Unmarshal(data, &d)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// ToJSON converts AccountInfo to JSON format
+func (a *AccountInfo) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(a, "", "  ")
+}
+
+// AccountInfoFromJSON converts JSON data to AccountInfo struct
+func AccountInfoFromJSON(data []byte) (*AccountInfo, error) {
+	var a AccountInfo
+	err := json.Unmarshal(data, &a)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// ToJSON converts User to JSON format
+func (u *User) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(u, "", "  ")
+}
+
+// UserFromJSON converts JSON data to User struct
+func UserFromJSON(data []byte) (*User, error) {
+	var u User
+	err := json.Unmarshal(data, &u)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// ... (other command definitions)
+
+// backupCmd defines the "backup" command
+var backupCmd = &cobra.Command{
+	Use:   "backup [backupPath]",
+	Short: "Create a backup of encrypted data",
+	Long:  `The backup command allows you to create a backup of your encrypted account data.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		backupPath := args[0]
+		config := loadConfiguration("default")
+		dbData := retrieveAllFromDatabase()
+		backupData := BackupData{Configuration: config, EncryptedData: dbData}
+		backupDataJSON, _ := backupData.ToJSON()
+		_ = ioutil.WriteFile(backupPath, backupDataJSON, 0644)
+	},
+}
+
+// recoverCmd defines the "recover" command
+var recoverCmd = &cobra.Command{
+	Use:   "recover [backupPath]",
+	Short: "Recover account data from a backup",
+	Long:  `The recover command allows you to recover your account data from a backup file.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		backupPath := args[0]
+		backupDataJSON, err := ioutil.ReadFile(backupPath)
+		if err != nil {
+			log.Fatal("Error reading backup file:", err)
+		}
+		var backupData BackupData
+		_ = json.Unmarshal(backupDataJSON, &backupData)
+		storeConfiguration("default", backupData.Configuration.SymmetricKey)
+		storeAllInDatabase(backupData.EncryptedData)
+	},
+}
+
+var db *sql.DB
+var serverCertPath = "server-cert.pem" // Update with the actual path
+var serverKeyPath = "server-key.pem"   // Update with the actual path
+var caCertPath = "ca-cert.pem"         // Update with the actual path
+
+func init() {
+	rootCmd.AddCommand(configCmd, newCmd, getCmd, backupCmd, recoverCmd)
+}
+
+func main() {
+	connectToDatabase()
+	initTLS()
 	if err := rootCmd.Execute(); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 }
 
+// Database connection setup
 func connectToDatabase() {
+	// Set your database connection parameters here
 	connStr := "user=username dbname=mydb sslmode=disable password=mypassword"
 	var err error
 	db, err = sql.Open("postgres", connStr)
@@ -108,14 +236,78 @@ func connectToDatabase() {
 	fmt.Println("Connected to the database!")
 }
 
-func generateSymmetricKey(password string) string {
-	salt := []byte("somesalt") // This should be unique for each user in production application
-	key := pbkdf2.Key([]byte(password), salt, 4096, 32, sha256.New)
-	return base64.StdEncoding.EncodeToString(key)
+// Server configuration
+
+func initTLS() {
+	cert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading server key pair: %s", err)
+	}
+	caCert, err := ioutil.ReadFile(caCertPath)
+	if err != nil {
+		log.Fatalf("Error reading CA certificate: %s", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientCAs:    caCertPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+	}
+
+	http.HandleFunc("/", handleRequest)
+	server := &http.Server{
+		Addr:      ":8443",
+		TLSConfig: tlsConfig,
+	}
+
+	go func() {
+		log.Println("Starting server on :8443...")
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			log.Fatalf("Error starting server: %s", err)
+		}
+	}()
 }
 
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "Hello, this is a secure server!")
+}
+
+// User functions for authentication
+
+func GetUserByUsername(username string) (*User, error) {
+	// Implement logic to retrieve user from storage
+	return nil, nil
+}
+
+func CreateUser(username, password string) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	// Implement logic to store new user in storage
+	return nil
+}
+
+func AuthenticateUser(username, password string) (bool, error) {
+	user, err := GetUserByUsername(username)
+	if err != nil {
+		return false, err
+	}
+	if user == nil {
+		return false, nil
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// Store configuration data to a file
 func storeConfiguration(username, symmetricKey string) {
-	data := &configuration{
+	data := &Configuration{
 		Username:     username,
 		SymmetricKey: symmetricKey,
 	}
@@ -124,15 +316,27 @@ func storeConfiguration(username, symmetricKey string) {
 	_ = ioutil.WriteFile("config.json", file, 0644)
 }
 
-func loadConfiguration(username string) *configuration {
+// Load configuration data from a file
+func loadConfiguration(username string) *Configuration {
 	file, _ := ioutil.ReadFile("config.json")
 
-	data := new(configuration)
+	data := new(Configuration)
 	_ = json.Unmarshal([]byte(file), data)
 
 	return data
 }
 
+// ... (other configurations and functions)
+
+// Data structure for user authentication
+type User struct {
+	Username string
+	Password string
+}
+
+// ... (other database data structures)
+
+// Encrypt data using a symmetric key
 func encryptWithKey(symmetricKey, description, username, password string) (string, error) {
 	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
 	block, err := aes.NewCipher(key)
@@ -153,6 +357,24 @@ func encryptWithKey(symmetricKey, description, username, password string) (strin
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
+// ... (other encryption and decryption functions)
+
+// Data structure for configuration
+type Configuration struct {
+	Username     string
+	SymmetricKey string
+}
+
+// Data structure for database data
+type DatabaseData struct {
+	Description   string
+	Username      string
+	EncryptedData string
+}
+
+// ... (other data structures)
+
+// Store encrypted data in the database
 func storeInDatabase(description, username, encryptedData string) {
 	query := `INSERT INTO accounts(description, username, encrypted_data) VALUES($1, $2, $3)`
 	_, err := db.Exec(query, description, username, encryptedData)
@@ -161,6 +383,7 @@ func storeInDatabase(description, username, encryptedData string) {
 	}
 }
 
+// Retrieve encrypted data from the database
 func retrieveFromDatabase(description string) *databaseData {
 	var data databaseData
 	query := `SELECT description, username, encrypted_data FROM accounts WHERE description=$1`
@@ -172,6 +395,7 @@ func retrieveFromDatabase(description string) *databaseData {
 	return &data
 }
 
+// Decrypt data using a symmetric key
 func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
 	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
 	block, err := aes.NewCipher(key)
@@ -194,46 +418,13 @@ func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
 	return string(ciphertext), nil
 }
 
-func loadCACert() (*x509.CertPool, error) {
-	// Load the CA certificate
-	caCert, err := ioutil.ReadFile("ca-cert.pem")
-	if err != nil {
-		return nil, err
-	}
-
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	return caCertPool, nil
-}
-
-func createTLSConfig() (*tls.Config, error) {
-	caCertPool, err := loadCACert()
-	if err != nil {
-		return nil, err
-	}
-
-	clientCert := "server-cert.pem"
-	clientKey := "server-key.pem"
-
-	cert, err := tls.LoadX509KeyPair(clientCert, clientKey)
-	if err != nil {
-		return nil, err
-	}
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-	}
-
-	return tlsConfig, nil
-}
-
+// Data structure for configuration
 type configuration struct {
 	Username     string
 	SymmetricKey string
 }
 
+// Data structure for database data
 type databaseData struct {
 	Description   string
 	Username      string
