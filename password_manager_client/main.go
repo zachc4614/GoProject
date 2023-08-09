@@ -14,7 +14,6 @@ import (
 	"os"
 	"runtime/debug"
 	"time"
-
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/pbkdf2"
