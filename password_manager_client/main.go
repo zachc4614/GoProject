@@ -25,6 +25,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+type EncryptedPayload struct {
+	Description string `json:"description"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+}
 // User represents user information
 type User struct {
 	Username string `json:"username"`
@@ -122,14 +127,26 @@ func initTLS() {
 }
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Example error handling
+	if r.Method != http.MethodGet {
+		errorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
 	fmt.Fprintln(w, "Hello, this is a secure server!")
 }
-
 // User functions for authentication
 
 func GetUserByUsername(username string) (*User, error) {
-	// Implement logic to retrieve user from storage
-	return nil, nil
+	user := &User{}
+	query := "SELECT username, password FROM users WHERE username=$1"
+	err := db.QueryRow(query, username).Scan(&user.Username, &user.Password)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No matching user found
+		}
+		return nil, err // Some other database error
+	}
+	return user, nil
 }
 
 func CreateUser(username, password string) error {
@@ -137,8 +154,9 @@ func CreateUser(username, password string) error {
 	if err != nil {
 		return err
 	}
-	// Implement logic to store new user in storage
-	return nil
+	query := "INSERT INTO users(username, password) VALUES($1, $2)"
+	_, err = db.Exec(query, username, string(hashedPassword))
+	return err
 }
 
 func AuthenticateUser(username, password string) (bool, error) {
@@ -168,32 +186,37 @@ func storeConfiguration(username, symmetricKey string) {
 }
 
 // Load configuration data from a file
-func loadConfiguration(username string) *Configuration {
-	file, _ := ioutil.ReadFile("config.json")
+func loadConfiguration(username string) (*Configuration, error) {
+	file, err := ioutil.ReadFile("config.json")
+	if err != nil {
+		return nil, err
+	}
 
 	data := new(Configuration)
-	_ = json.Unmarshal([]byte(file), data)
+	err = json.Unmarshal(file, data)
+	if err != nil {
+		return nil, err
+	}
 
-	return data
+	return data, nil
 }
-
-// Data structure for user authentication
-type User struct {
-	Username string
-	Password string
-}
-
-// ... (other database data structures)
 
 // Encrypt data using a symmetric key
-func encryptWithKey(symmetricKey, description, username, password string) (string, error) {
-	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
+func encryptWithKey(symmetricKey string, payload *EncryptedPayload) (string, error) {
+	key, err := base64.StdEncoding.DecodeString(symmetricKey)
+	if err != nil {
+		return "", err
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
 
-	plaintext := []byte(description + username + password)
+	plaintext, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
 	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
 	iv := ciphertext[:aes.BlockSize]
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
@@ -206,19 +229,6 @@ func encryptWithKey(symmetricKey, description, username, password string) (strin
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
-// Data structure for configuration
-type Configuration struct {
-	Username     string
-	SymmetricKey string
-}
-
-// Data structure for database data
-type DatabaseData struct {
-	Description   string
-	Username      string
-	EncryptedData string
-}
-
 // Store encrypted data in the database
 func storeInDatabase(description, username, encryptedData string) {
 	query := `INSERT INTO accounts(description, username, encrypted_data) VALUES($1, $2, $3)`
@@ -229,8 +239,8 @@ func storeInDatabase(description, username, encryptedData string) {
 }
 
 // Retrieve encrypted data from the database
-func retrieveFromDatabase(description string) *databaseData {
-	var data databaseData
+func retrieveFromDatabase(description string) *DatabaseData {
+	var data DatabaseData // Fixed variable type name
 	query := `SELECT description, username, encrypted_data FROM accounts WHERE description=$1`
 	row := db.QueryRow(query, description)
 	err := row.Scan(&data.Description, &data.Username, &data.EncryptedData)
@@ -263,16 +273,7 @@ func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
 	return string(ciphertext), nil
 }
 
-// Data structure for configuration
-type configuration struct {
-	Username     string
-	SymmetricKey string
+func errorResponse(w http.ResponseWriter, status int, message string) {
+	w.WriteHeader(status)
+	fmt.Fprintln(w, message)
 }
-
-// Data structure for database data
-type databaseData struct {
-	Description   string
-	Username      string
-	EncryptedData string
-}
-
