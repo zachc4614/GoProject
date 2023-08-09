@@ -16,7 +16,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.16
+          go-version: 1.20
+          
+      - name: Resolve dependencies
+        run: |
+          cd password_manager_client
+          go mod tidy
+          go mod download
 
       - name: Build and test
         run: |
