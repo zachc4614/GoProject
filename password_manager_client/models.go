@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"golang.org/x/crypto/bcrypt"
+	"log"
 )
+
+var modelsLogger *log.Logger
 
 // User represents user information
 type User struct {
@@ -14,38 +17,52 @@ type User struct {
 
 // GetUserByUsername retrieves user by username
 func GetUserByUsername(username string) (*User, error) {
+	modelsLogger.Printf("Retrieving user by username: %s", username)
+
 	// Implement your logic to retrieve user from storage (e.g., database)
 	// Return user and nil if found, or nil and an error if not found
+
 	return nil, nil
 }
 
 // CreateUser stores a new user
 func CreateUser(username, password string) error {
+	modelsLogger.Printf("Creating new user: %s", username)
+
 	// Hash the password before storing
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		modelsLogger.Printf("Error generating password hash: %v", err)
 		return err
 	}
 
 	// Implement your logic to store new user in storage (e.g., database)
+
 	return nil
 }
 
 // AuthenticateUser authenticates user credentials
 func AuthenticateUser(username, password string) (bool, error) {
+	modelsLogger.Printf("Authenticating user: %s", username)
+
 	user, err := GetUserByUsername(username)
 	if err != nil {
+		modelsLogger.Printf("Error retrieving user: %v", err)
 		return false, err
 	}
 
 	if user == nil {
+		modelsLogger.Printf("User not found: %s", username)
 		return false, nil
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
+		modelsLogger.Printf("Authentication failed for user: %s", username)
 		return false, nil
 	}
+
+	modelsLogger.Printf("User authenticated: %s", username)
 
 	return true, nil
 }
