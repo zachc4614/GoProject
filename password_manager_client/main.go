@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
-	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 	_ "github.com/lib/pq" // Assuming you're using PostgreSQL
 	"fyne.io/fyne/v2/app"
