@@ -1,50 +1,55 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// User represents user information
-type User struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+var userStore map[string]string // In-memory store for users
+
+func initStore() {
+	userStore = make(map[string]string)
 }
 
-// GetUserByUsername retrieves user by username
 func GetUserByUsername(username string) (*User, error) {
-	var user User
-	err := db.QueryRow("SELECT username, password FROM users WHERE username = $1", username).Scan(&user.Username, &user.Password)
-	if err != nil {
-		return nil, err
+	modelsLogger.Printf("Retrieving user by username: %s", username)
+	if hashedPassword, found := userStore[username]; found {
+		return &User{Username: username, Password: hashedPassword}, nil
 	}
-	return &user, nil
+	return nil, errors.New("user not found")
 }
 
-// CreateUser stores a new user
 func CreateUser(username, password string) error {
+	modelsLogger.Printf("Creating new user: %s", username)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		modelsLogger.Printf("Error generating password hash: %v", err)
 		return err
 	}
-	_, err = db.Exec("INSERT INTO users (username, password) VALUES ($1, $2)", username, string(hashedPassword))
-	return err
+	userStore[username] = string(hashedPassword)
+	return nil
 }
 
-// AuthenticateUser authenticates user credentials
 func AuthenticateUser(username, password string) (bool, error) {
+	modelsLogger.Printf("Authenticating user: %s", username)
 	user, err := GetUserByUsername(username)
 	if err != nil {
+		modelsLogger.Printf("Error retrieving user: %v", err)
 		return false, err
 	}
+
 	if user == nil {
-		return false, errors.New("user not found")
-	}
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
+		modelsLogger.Printf("User not found: %s", username)
 		return false, nil
 	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if err != nil {
+		modelsLogger.Printf("Authentication failed for user: %s", username)
+		return false, nil
+	}
+
+	modelsLogger.Printf("User authenticated: %s", username)
 	return true, nil
 }
 
