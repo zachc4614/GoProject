@@ -18,7 +18,7 @@ import (
 	"os"
 	"runtime/debug"
 	"golang.org/x/crypto/bcrypt"
-	_ "github.com/lib/pq" // Assuming you're using PostgreSQL
+	_ "github.com/lib/pq"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -55,6 +55,19 @@ var serverCertPath = "server-cert.pem"
 var serverKeyPath = "server-key.pem"
 var caCertPath = "ca-cert.pem"
 
+func main() {
+	logger = log.New(os.Stdout, "[PasswordManager] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Printf("Panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	connectToDatabase()
+	initTLS()
+	guiWindow := createGUI()
+	guiWindow.ShowAndRun()
+}
+
 func createGUI() fyne.Window {
 	myApp := app.New()
 	window := myApp.NewWindow("Password Manager")
@@ -67,19 +80,6 @@ func createGUI() fyne.Window {
 	content := container.NewVBox(titleLabel, descriptionLabel, newButton, getButton, backupButton, recoverButton)
 	window.SetContent(content)
 	return window
-}
-
-func main() {
-	logger = log.New(os.Stdout, "[PasswordManager] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Printf("Panic: %v\n%s", r, debug.Stack())
-		}
-	}()
-	connectToDatabase()
-	initTLS()
-	guiWindow := createGUI()
-	guiWindow.ShowAndRun()
 }
 
 func connectToDatabase() {
