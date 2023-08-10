@@ -2,10 +2,19 @@ package main
 
 import (
 	"errors"
+	"log"
+	"os"
+
 	"golang.org/x/crypto/bcrypt"
 )
 
+var modelsLogger *log.Logger
 var userStore map[string]string // In-memory store for users
+
+func init() {
+	modelsLogger = log.New(os.Stdout, "[Models] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	initStore()
+}
 
 func initStore() {
 	userStore = make(map[string]string)
