@@ -29,28 +29,24 @@ type EncryptedPayload struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 }
-// User represents user information
+
 type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// Configuration represents the user's configuration
 type Configuration struct {
 	Username     string `json:"username"`
 	SymmetricKey string `json:"symmetric_key"`
 }
 
-// DatabaseData represents the encrypted data stored in the database
 type DatabaseData struct {
 	Description   string `json:"description"`
 	Username      string `json:"username"`
 	EncryptedData string `json:"encrypted_data"`
 }
 
-// Global variables
 var logger *log.Logger
-var db *sql.DB
 var serverCertPath = "server-cert.pem"
 var serverKeyPath = "server-key.pem"
 var caCertPath = "ca-cert.pem"
@@ -62,7 +58,8 @@ func main() {
 			logger.Printf("Panic: %v\n%s", r, debug.Stack())
 		}
 	}()
-	connectToDatabase()
+	db := connectToDatabase()
+	defer db.Close()
 	initTLS()
 	guiWindow := createGUI()
 	guiWindow.ShowAndRun()
@@ -82,11 +79,9 @@ func createGUI() fyne.Window {
 	return window
 }
 
-func connectToDatabase() {
-	// Set your database connection parameters here
+func connectToDatabase() *sql.DB {
 	connStr := "user=username dbname=mydb sslmode=disable password=mypassword"
-	var err error
-	db, err = sql.Open("postgres", connStr)
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		logger.Fatal("Database connection error:", err)
 	}
@@ -94,6 +89,7 @@ func connectToDatabase() {
 		logger.Fatal("Database ping error:", err)
 	}
 	logger.Println("Connected to the database!")
+	return db
 }
 
 func initTLS() {
@@ -126,81 +122,42 @@ func initTLS() {
 }
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
-	// Example error handling
 	if r.Method != http.MethodGet {
 		errorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	fmt.Fprintln(w, "Hello, this is a secure server!")
 }
-// User functions for authentication
 
-func GetUserByUsername(username string) (*User, error) {
-	user := &User{}
-	query := "SELECT username, password FROM users WHERE username=$1"
-	err := db.QueryRow(query, username).Scan(&user.Username, &user.Password)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // No matching user found
-		}
-		return nil, err // Some other database error
-	}
-	return user, nil
-}
-
-func CreateUser(username, password string) error {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	query := "INSERT INTO users(username, password) VALUES($1, $2)"
-	_, err = db.Exec(query, username, string(hashedPassword))
-	return err
-}
-
-func AuthenticateUser(username, password string) (bool, error) {
-	user, err := GetUserByUsername(username)
-	if err != nil {
-		return false, err
-	}
-	if user == nil {
-		return false, nil
-	}
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
-		return false, nil
-	}
-	return true, nil
-}
-
-// Store configuration data to a file
 func storeConfiguration(username, symmetricKey string) {
 	data := &Configuration{
 		Username:     username,
 		SymmetricKey: symmetricKey,
 	}
-
-	file, _ := json.MarshalIndent(data, "", " ")
-	_ = ioutil.WriteFile("config.json", file, 0644)
+	file, err := json.MarshalIndent(data, "", " ")
+	if err != nil {
+		logger.Println("Error marshaling configuration:", err)
+		return
+	}
+	err = ioutil.WriteFile("config.json", file, 0644)
+	if err != nil {
+		logger.Println("Error writing configuration to file:", err)
+	}
 }
 
-// Load configuration data from a file
 func loadConfiguration(username string) (*Configuration, error) {
 	file, err := ioutil.ReadFile("config.json")
 	if err != nil {
 		return nil, err
 	}
-
 	data := new(Configuration)
 	err = json.Unmarshal(file, data)
 	if err != nil {
 		return nil, err
 	}
-
 	return data, nil
 }
 
-// Encrypt data using a symmetric key
 func encryptWithKey(symmetricKey string, payload *EncryptedPayload) (string, error) {
 	key, err := base64.StdEncoding.DecodeString(symmetricKey)
 	if err != nil {
@@ -210,69 +167,64 @@ func encryptWithKey(symmetricKey string, payload *EncryptedPayload) (string, err
 	if err != nil {
 		return "", err
 	}
-
 	plaintext, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-
 	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
 	iv := ciphertext[:aes.BlockSize]
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
 		return "", err
 	}
-
 	stream := cipher.NewCFBEncrypter(block, iv)
 	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
-
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
-// Store encrypted data in the database
-func storeInDatabase(description, username, encryptedData string) {
+func storeInDatabase(db *sql.DB, description, username, encryptedData string) error {
 	query := `INSERT INTO accounts(description, username, encrypted_data) VALUES($1, $2, $3)`
 	_, err := db.Exec(query, description, username, encryptedData)
-	if err != nil {
-		log.Fatal(err)
-	}
+	return err
 }
 
-// Retrieve encrypted data from the database
-func retrieveFromDatabase(description string) *DatabaseData {
-	var data DatabaseData // Fixed variable type name
+func retrieveFromDatabase(db *sql.DB, description string) (*DatabaseData, error) {
+	data := new(DatabaseData)
 	query := `SELECT description, username, encrypted_data FROM accounts WHERE description=$1`
-	row := db.QueryRow(query, description)
-	err := row.Scan(&data.Description, &data.Username, &data.EncryptedData)
+	err := db.QueryRow(query, description).Scan(&data.Description, &data.Username, &data.EncryptedData)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return &data
+	return data, nil
 }
 
-// Decrypt data using a symmetric key
 func decryptWithKey(symmetricKey, encryptedData string) (string, error) {
-	key, _ := base64.StdEncoding.DecodeString(symmetricKey)
+	key, err := base64.StdEncoding.DecodeString(symmetricKey)
+	if err != nil {
+		return "", err
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
-
-	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedData)
-
-	if len(ciphertext) < aes.BlockSize {
-		return "", errors.New("Ciphertext too short")
+	ciphertext, err := base64.URLEncoding.DecodeString(encryptedData)
+	if err != nil {
+		return "", err
 	}
-
+	if len(ciphertext) < aes.BlockSize {
+		return "", errors.New("ciphertext too short")
+	}
 	iv := ciphertext[:aes.BlockSize]
 	ciphertext = ciphertext[aes.BlockSize:]
-
 	stream := cipher.NewCFBDecrypter(block, iv)
 	stream.XORKeyStream(ciphertext, ciphertext)
-
-	return string(ciphertext), nil
+	var result EncryptedPayload
+	if err := json.Unmarshal(ciphertext, &result); err != nil {
+		return "", err
+	}
+	return result.Password, nil
 }
 
-func errorResponse(w http.ResponseWriter, status int, message string) {
-	w.WriteHeader(status)
-	fmt.Fprintln(w, message)
+func errorResponse(w http.ResponseWriter, statusCode int, message string) {
+	w.WriteHeader(statusCode)
+	fmt.Fprintf(w, "{\"error\": \"%s\"}", message)
 }
