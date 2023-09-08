@@ -1,11 +1,21 @@
 package main
 
 import (
-	"errors"
+	"database/sql"
 	"log"
 	"os"
+	"github.com/zachc4614/GoProject/password_manager_client"
+
+	_ "github.com/lib/pq" // PostgreSQL driver
 	"golang.org/x/crypto/bcrypt"
-	"database/sql"
+)
+
+var (
+	dbHost     = "your-db-host"
+	dbPort     = 5432
+	dbUser     = "your-db-username"
+	dbPassword = "your-db-password"
+	dbName     = "your-db-name"
 )
 
 var modelsLogger *log.Logger
@@ -14,14 +24,19 @@ func init() {
 	modelsLogger = log.New(os.Stdout, "[Models] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
 }
 
-func GetUserByUsername(username string) (*User, error) {
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func GetUserByUsername(db *sql.DB, username string) (*User, error) {
 	modelsLogger.Printf("Retrieving user by username: %s", username)
-	
+
 	var hashedPassword string
 	err := db.QueryRow("SELECT password FROM users WHERE username = $1", username).Scan(&hashedPassword)
-	
+
 	if err == sql.ErrNoRows {
-		return nil, errors.New("authentication failed")
+		return nil, sql.ErrNoRows
 	} else if err != nil {
 		return nil, err
 	}
@@ -29,7 +44,7 @@ func GetUserByUsername(username string) (*User, error) {
 	return &User{Username: username, Password: hashedPassword}, nil
 }
 
-func CreateUser(username, password string) error {
+func CreateUser(db *sql.DB, username, password string) error {
 	modelsLogger.Printf("Creating new user: %s", username)
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -47,10 +62,10 @@ func CreateUser(username, password string) error {
 	return nil
 }
 
-func AuthenticateUser(username, password string) (bool, error) {
+func AuthenticateUser(db *sql.DB, username, password string) (bool, error) {
 	modelsLogger.Printf("Authenticating user: %s", username)
 
-	user, err := GetUserByUsername(username)
+	user, err := GetUserByUsername(db, username)
 	if err != nil {
 		modelsLogger.Printf("Error retrieving user: %v", err)
 		return false, err
@@ -64,18 +79,4 @@ func AuthenticateUser(username, password string) (bool, error) {
 
 	modelsLogger.Printf("User authenticated: %s", username)
 	return true, nil
-}
-
-// DatabaseData represents data stored in the database
-type DatabaseData struct {
-	Description   string `json:"description"`
-	Username      string `json:"username"`
-	EncryptedData string `json:"encrypted_data"`
-}
-
-// AccountInfo represents account information
-type AccountInfo struct {
-	Description string `json:"description"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
 }
