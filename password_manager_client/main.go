@@ -10,14 +10,6 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
-var (
-	dbHost     = "localhost"
-	dbPort     = 5432
-	dbUser     = "postgres"
-	dbPassword = "postgres"
-	dbName     = "postgres"
-)
-
 func main() {
 	username := flag.String("username", "", "Username")
 	action := flag.String("action", "", "Action (create or get)")
