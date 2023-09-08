@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"github.com/zachc4614/GoProject/password_manager_client"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	dbHost     = "your-db-host"
+	dbHost     = "localhost"
 	dbPort     = 5432
-	dbUser     = "your-db-username"
-	dbPassword = "your-db-password"
-	dbName     = "your-db-name"
+	dbUser     = "postgres"
+	dbPassword = "postgres"
+	dbName     = "postgres"
 )
 
 func main() {
