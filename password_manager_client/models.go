@@ -1,70 +1,80 @@
 package main
 
 import (
-    "database/sql"
-    "flag"
-    "fmt"
-    "log"
-    "os"
+	"database/sql"
+	"log"
+	"os"
 
-    _ "github.com/lib/pq" // PostgreSQL driver
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-    dbHost     = "localhost"
-    dbPort     = 5432
-    dbUser     = "postgres"
-    dbPassword = "postgres"
-    dbName     = "postgres"
+	dbHost     = "localhost"
+	dbPort     = 5432
+	dbUser     = "postgres"
+	dbPassword = "postgres"
+	dbName     = "postgres"
 )
 
-func main() {
-    username := flag.String("username", "", "Username")
-    action := flag.String("action", "", "Action (create or get)")
+var modelsLogger *log.Logger
 
-    flag.Parse()
-
-    if *username == "" || *action == "" {
-        fmt.Println("Usage: main -username <username> -action <action>")
-        os.Exit(1)
-    }
-
-    db, err := connectToDatabase()
-    if err != nil {
-        log.Fatalf("Database connection error: %v", err)
-    }
-    defer db.Close()
-
-    switch *action {
-    case "create":
-        createUser(db, *username)
-    case "get":
-        getUser(db, *username)
-    default:
-        fmt.Println("Invalid action. Use 'create' or 'get'.")
-        os.Exit(1)
-    }
+func init() {
+	modelsLogger = log.New(os.Stdout, "[Models] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
 }
 
-func connectToDatabase() (*sql.DB, error) {
-    connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPassword, dbName)
-    db, err := sql.Open("postgres", connStr)
-    if err != nil {
-        return nil, err
-    }
-    if err = db.Ping(); err != nil {
-        return nil, err
-    }
-    fmt.Println("Connected to the database!")
-    return db, nil
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
-func createUser(db *sql.DB, username string) {
-    // Implement user creation logic here
-    fmt.Printf("Creating user with username: %s\n", username)
+func GetUserByUsername(db *sql.DB, username string) (*User, error) {
+	modelsLogger.Printf("Retrieving user by username: %s", username)
+
+	var hashedPassword string
+	err := db.QueryRow("SELECT password FROM users WHERE username = $1", username).Scan(&hashedPassword)
+
+	if err == sql.ErrNoRows {
+		return nil, sql.ErrNoRows
+	} else if err != nil {
+		return nil, err
+	}
+
+	return &User{Username: username, Password: hashedPassword}, nil
 }
 
-func getUser(db *sql.DB, username string) {
-    // Implement user retrieval logic here
-    fmt.Printf("Getting user with username: %s\n", username)
+func CreateUser(db *sql.DB, username, password string) error {
+	modelsLogger.Printf("Creating new user: %s", username)
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		modelsLogger.Printf("Error generating password hash: %v", err)
+		return err
+	}
+
+	_, err = db.Exec("INSERT INTO users (username, password) VALUES ($1, $2)", username, string(hashedPassword))
+	if err != nil {
+		modelsLogger.Printf("Error inserting new user into the database: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func AuthenticateUser(db *sql.DB, username, password string) (bool, error) {
+	modelsLogger.Printf("Authenticating user: %s", username)
+
+	user, err := GetUserByUsername(db, username)
+	if err != nil {
+		modelsLogger.Printf("Error retrieving user: %v", err)
+		return false, err
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if err != nil {
+		modelsLogger.Printf("Authentication failed for user: %s", username)
+		return false, nil
+	}
+
+	modelsLogger.Printf("User authenticated: %s", username)
+	return true, nil
 }
