@@ -1,27 +1,2 @@
-August 8th changes to main.go:
-
-    Password Generation: Implemented a complex password generator in the existing main.go code, ensuring passwords are at least 12-15 characters long, including a mix of uppercase letters, lowercase letters, special characters, and numbers.
-
-    Error Handling for Missing Configuration File: Added error handling code to ensure the client tool gracefully handles situations where the configuration file is missing.
-
-    TLS Communication with Backend Database: Integrated TLS communication in the client tool by configuring the server certificate, CA certificate, and private key, ensuring secure communication with the backend database.
-
-August 9th changes to project:
-
-        Implemented Multiple Master Users/Password Support: Added the ability to support multiple master users and passwords, allowing different users to securely manage their accounts.
-
-    Refactored Code in main.go and models.go: Refactored the codebase to improve code structure, readability, and maintainability, enhancing the overall quality of the application.
-
-    Added Functionality for Backup and Recovery: Implemented backup and recovery features, enabling users to safeguard their account data and restore it when needed.
-
-    Conducted a Security Audit: Reviewed and assessed the application's security measures to identify potential vulnerabilities and ensure robust protection of sensitive information.
-
-    Added User Authentication: Integrated user authentication to validate user credentials and provide a secure access control mechanism to the password manager.
-
-    Created a Graphical User Interface: Developed a graphical user interface (GUI) to offer a user-friendly and intuitive interaction with the password manager tool.
-
-    Enabled Cross-Platform Support: Enhanced the application to be compatible with different operating systems, enabling wider usage across various platforms.
-
-    Implemented CI/CD Pipelines with Docker Image on GitHub: Set up Continuous Integration and Continuous Deployment (CI/CD) pipelines, utilizing Docker images for streamlined development, testing, and deployment workflows.[NOT COMPLETE]
-
-    Implemented Logging: Added logging functionality to the application, enabling comprehensive error tracking, debugging, and monitoring to improve overall reliability.
+-ALL FILES UPDATED
+-config.go ADDED
